@@ -139,13 +139,14 @@ header{width:100%;max-width:430px;display:flex;justify-content:space-between;ali
 <div class="btnrow">
   <span class="seg" id="placeSeg">
     <button class="on" data-p="bar">On the bar</button>
-    <button data-p="wrist">Oni my wrist</button>
+    <button data-p="wrist">On my wrist</button>
   </span>
 </div>
 <div class="btnrow">
   <button class="btn" id="motionBtn">Enable motion</button>
   <button class="btn" id="editBtn">Edit exercises</button>
   <button class="btn primary" id="exportBtn" disabled>Export data (0)</button>
+  <button class="btn" id="clearBtn">Clear</button>
 </div>
 
 <div class="sessions" id="sessions">
@@ -177,6 +178,7 @@ Start with light weight. Keep the screen on — the app will try to hold a wake 
       <button id="tPlus">+</button>
     </div>
     <p class="note" style="max-width:none;text-align:left">This is the ground truth that makes the recording useful — Otto counted <b id="ottoSaid">0</b>.</p>
+    <input id="setNote" placeholder="Optional note: paused mid-set, re-racked, fast reps…" style="width:100%;background:#0f0f12;border:1px solid var(--line);border-radius:10px;color:var(--ink);font-family:inherit;font-size:13px;padding:10px 12px;margin-top:10px">
     <div class="btnrow">
       <button class="btn" id="discardBtn">Discard set</button>
       <button class="btn primary" id="saveSetBtn">Save set</button>
@@ -188,7 +190,7 @@ Start with light weight. Keep the screen on — the app will try to hold a wake 
 (function(){
 "use strict";
 const $=id=>document.getElementById(id);
-const APP_VERSION="otto-poc-0.2";
+const APP_VERSION="otto-poc-0.3";
 
 /* ================= exercises (editable, persisted) ================= */
 let EXERCISES=[
@@ -367,7 +369,7 @@ const chipHz=$("chipHz"),chipRec=$("chipRec");
    4. Hysteresis counter: arm when the bandpassed signal exceeds HI,
       count one rep when it falls below LO, then hold off REFRACT ms
       (kills touch-and-go double counts).                            */
-const ALGO={name:"v0.2-bandpass",fhp:0.2,flp:1.2,HI:0.8,LO:0.2,REFRACT:1600};
+const ALGO={name:"v0.3-bandpass",fhp:0.2,flp:1.2,HI:1.0,LO:0.25,REFRACT:1600};
 function biquad(b0,b1,b2,a1,a2){
   let x1=0,x2=0,y1=0,y2=0;
   return x=>{const y=b0*x+b1*x1+b2*x2-a1*y1-a2*y2;x2=x1;x1=x;y2=y1;y1=y;return y;};
@@ -453,7 +455,7 @@ function stopSet(){
   if(wakeLock){wakeLock.release().catch(()=>{});wakeLock=null;}
   truthVal=Math.max(liveReps,1);
   $("tVal").textContent=truthVal;$("ottoSaid").textContent=liveReps;
-  $("truthOverlay").classList.add("show");
+  $("setNote").value="";$("truthOverlay").classList.add("show");
 }
 
 /* ================= ground truth + sessions ================= */
@@ -469,6 +471,7 @@ $("saveSetBtn").addEventListener("click",()=>{
     exercise:EXERCISES[exIdx].name,weightLb:weight,placement:placement,
     sampleHz:Math.round(hzEMA||0),
     ottoCount:liveReps,trueCount:truthVal,
+    note:($("setNote").value||"").trim(),
     algo:ALGO,
     columns:["t_ms","agx","agy","agz","lax","lay","laz","rr_alpha","rr_beta","rr_gamma"],
     samples:samples
@@ -536,6 +539,11 @@ $("saveExBtn").addEventListener("click",()=>{
   screenIdx=0;renderScreen(0);
 });
 
+$("clearBtn").addEventListener("click",()=>{
+  if(!sessions.length)return;
+  if(confirm("Delete all "+sessions.length+" recorded sets? Export first if you haven't."))
+    {sessions=[];try{localStorage.removeItem("otto_sessions");}catch(e){}refreshSessions();}
+});
 refreshSessions();
 renderScreen(0);
 })();

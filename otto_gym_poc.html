@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0b0b0d">
+<title>Otto POC — rep counter</title>
+<!-- ============================================================
+  OTTO GYM POC v0.1
+  Open this file in Chrome on Android (or Safari on iPhone).
+  1. Tap "Enable motion" once (required on iPhone, harmless on Android)
+  2. Pick exercise, set weight, press the dial to START
+  3. Lift. Press again to STOP. Enter the TRUE rep count when asked.
+  4. After the workout, tap "Export data" and upload the JSON file
+     back to the chat for algorithm analysis.
+  Recorded per sample: t(ms), accel incl. gravity (x,y,z),
+  linear accel if available (x,y,z), gyro rotation rate (a,b,g).
+============================================================ -->
+<style>
+:root{
+  --bg:#0b0b0d; --panel:#141417; --line:rgba(255,255,255,.09);
+  --ink:#f5f5f7; --muted:#9a9aa0; --faint:#6b6b72; --accent:#fc5200; --accent2:#ff8a50;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Inter,Roboto,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;
+  display:flex;flex-direction:column;align-items:center;padding:14px 16px 40px;gap:14px;overflow-x:hidden}
+header{width:100%;max-width:430px;display:flex;justify-content:space-between;align-items:center}
+.mark{display:inline-flex;align-items:center;font-weight:700;font-size:17px}
+.mark .o{display:inline-block;width:15px;height:15px;margin-left:1px;border-radius:50%;background:radial-gradient(circle at 38% 30%,#2a2a2e,#0a0a0c);position:relative;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
+.mark .o::after{content:"";position:absolute;inset:2.5px;border-radius:50%;
+  background:conic-gradient(var(--accent) 0deg 230deg,rgba(255,255,255,.14) 230deg 360deg);
+  -webkit-mask:radial-gradient(circle,transparent 58%,#000 59%);mask:radial-gradient(circle,transparent 58%,#000 59%)}
+.chips{display:flex;gap:6px}
+.chip{font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:4px 10px}
+.chip.on{color:var(--accent2);border-color:rgba(252,82,0,.4)}
+
+/* ------- the dial ------- */
+.device{position:relative;width:min(330px,86vw);aspect-ratio:1;border-radius:50%;user-select:none;touch-action:none;
+  box-shadow:0 24px 50px rgba(0,0,0,.6),0 4px 14px rgba(0,0,0,.5);cursor:grab;flex:none}
+.bezel{position:absolute;inset:0;border-radius:50%;z-index:1;
+  background:conic-gradient(from 210deg,#d7d7db,#f7f7f9 12%,#b7b7bf 26%,#ededf0 44%,#c3c3ca 58%,#fbfbfc 74%,#c8c8cf 88%,#d7d7db);
+  box-shadow:inset 0 2px 3px rgba(255,255,255,.9),inset 0 -3px 6px rgba(0,0,0,.3);will-change:transform}
+.bezel::after{content:"";position:absolute;top:2.6%;left:50%;transform:translateX(-50%);
+  width:5.5%;height:2.4%;border-radius:99px;background:rgba(0,0,0,.16);
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.35),0 1px 1px rgba(255,255,255,.55)}
+.face{position:absolute;inset:9.5%;border-radius:50%;background:radial-gradient(circle at 34% 26%,#1d1d22,#08080a 72%);
+  box-shadow:inset 0 4px 14px rgba(0,0,0,.85),inset 0 -1px 2px rgba(255,255,255,.06);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;border:0;color:#fff;
+  transition:transform .1s ease;touch-action:none;overflow:hidden;z-index:2}
+.face.pressed{transform:scale(.985)}
+.gauge{position:absolute;inset:1%;pointer-events:none;z-index:2}
+.gauge .track{stroke:rgba(255,255,255,.10)}
+.gauge .arc{stroke:url(#pArc);transition:stroke-dashoffset .35s cubic-bezier(.3,.8,.3,1)}
+.gauge .seg-track{stroke:rgba(255,255,255,.10);fill:none;stroke-width:3;stroke-linecap:round}
+.gauge .seg-fill{stroke:url(#pArc);fill:none;stroke-width:3;stroke-linecap:round}
+.screen{display:flex;flex-direction:column;align-items:center;gap:2px;position:relative;z-index:3;width:100%;will-change:transform;pointer-events:none}
+.pill{font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#0d0d0f;background:#e9e9ec;border-radius:99px;padding:4px 12px;margin-bottom:6px}
+.big{font-size:clamp(58px,19vw,84px);font-weight:600;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums;color:#f5f5f7}
+.big.text{font-size:clamp(22px,6.5vw,30px);letter-spacing:-.02em;line-height:1.15;text-align:center;max-width:72%;font-weight:650;padding:12px 0}
+.unit{font-size:12px;font-weight:700;letter-spacing:.18em;color:#9a9aa0}
+.status{font-size:9.5px;font-weight:700;letter-spacing:.22em;color:#7c7c84;margin-top:8px}
+.status.on{color:var(--accent2)}
+.chev{position:absolute;color:#7a7a82;font-size:22px;font-weight:600;line-height:1;z-index:4;cursor:pointer;padding:10px;transition:opacity .25s}
+.chev.left{left:4.5%;top:50%;transform:translateY(-50%)}
+.chev.right{right:4.5%;top:50%;transform:translateY(-50%)}
+.chev.hide{opacity:0;pointer-events:none}
+.hint{font-size:13px;color:var(--muted);text-align:center;min-height:36px;max-width:340px;line-height:1.45}
+
+/* ------- controls & sessions ------- */
+.btnrow{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.btn{background:var(--panel);border:1px solid var(--line);border-radius:99px;color:var(--ink);
+  font-family:inherit;font-size:13.5px;font-weight:600;padding:11px 18px;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn:disabled{opacity:.4}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:99px;overflow:hidden}
+.seg button{background:none;border:0;color:var(--muted);font-family:inherit;font-size:12.5px;font-weight:600;padding:9px 16px;cursor:pointer}
+.seg button.on{background:var(--accent);color:#fff}
+.sessions{width:100%;max-width:430px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px 16px;display:none}
+.sessions.show{display:block}
+.sessions .lh{display:flex;justify-content:space-between;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.srow{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px dashed var(--line);font-size:13px;font-variant-numeric:tabular-nums}
+.srow .ok{color:#4ade80;font-weight:700}
+.srow .bad{color:var(--accent2);font-weight:700}
+.note{font-size:11px;color:var(--faint);text-align:center;max-width:340px;line-height:1.5}
+
+/* ------- modals ------- */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:flex-end;justify-content:center;z-index:50}
+.overlay.show{display:flex}
+.sheet{background:#17171b;border:1px solid var(--line);border-radius:20px 20px 0 0;width:100%;max-width:430px;padding:20px;max-height:82vh;overflow:auto}
+.sheet h3{font-size:16px;letter-spacing:-.02em;margin-bottom:14px}
+.exrow{display:flex;gap:8px;margin-bottom:8px}
+.exrow input{background:#0f0f12;border:1px solid var(--line);border-radius:10px;color:var(--ink);font-family:inherit;font-size:14px;padding:10px 12px;min-width:0}
+.exrow input.nm{flex:1}
+.exrow input.wt{width:74px;text-align:right}
+.exrow button{background:none;border:0;color:var(--faint);font-size:17px;cursor:pointer;padding:0 4px}
+.sheet .btnrow{margin-top:14px}
+.numpick{display:flex;align-items:center;justify-content:center;gap:18px;margin:10px 0 4px}
+.numpick button{width:52px;height:52px;border-radius:50%;background:#0f0f12;border:1px solid var(--line);color:var(--ink);font-size:22px;cursor:pointer}
+.numpick .val{font-size:44px;font-weight:600;min-width:70px;text-align:center;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+
+<header>
+  <span class="mark">ott<span class="o"></span></span>
+  <div class="chips">
+    <span class="chip" id="chipHz">— Hz</span>
+    <span class="chip" id="chipRec">IDLE</span>
+  </div>
+</header>
+
+<div class="device" id="device">
+  <div class="bezel" id="bezel"></div>
+  <button class="face" id="face">
+    <svg class="gauge" viewBox="0 0 100 100" aria-hidden="true">
+      <defs><linearGradient id="pArc" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stop-color="#fc5200"/><stop offset="1" stop-color="#ff8a50"/>
+      </linearGradient></defs>
+      <circle class="track" id="ringTrack" cx="50" cy="50" r="47.5" fill="none" stroke-width="3"/>
+      <circle class="arc" id="arc" cx="50" cy="50" r="47.5" fill="none" stroke-width="3" stroke-linecap="round"
+        stroke-dasharray="298.5 298.5" stroke-dashoffset="188" transform="rotate(-90 50 50)"/>
+      <g id="segs" style="display:none"></g>
+    </svg>
+    <span class="chev left hide" id="chLeft">‹</span>
+    <div class="screen" id="screen">
+      <span class="pill" id="pill">Exercise</span>
+      <span class="big text" id="big">Bench Press</span>
+      <span class="unit" id="unitTxt">1 OF 5</span>
+      <span class="status on" id="statusTxt">READY</span>
+    </div>
+    <span class="chev right" id="chRight">›</span>
+  </button>
+</div>
+
+<p class="hint" id="hint">Rotate the bezel or swipe to pick an exercise, then press the face.</p>
+
+<div class="btnrow">
+  <span class="seg" id="placeSeg">
+    <button class="on" data-p="bar">On the bar</button>
+    <button data-p="wrist">On my wrist</button>
+  </span>
+</div>
+<div class="btnrow">
+  <button class="btn" id="motionBtn">Enable motion</button>
+  <button class="btn" id="editBtn">Edit exercises</button>
+  <button class="btn primary" id="exportBtn" disabled>Export data (0)</button>
+</div>
+
+<div class="sessions" id="sessions">
+  <div class="lh"><span>Recorded sets</span><span id="sesCount"></span></div>
+</div>
+
+<p class="note" id="mountNote">Mount tip: strap the phone to the bar sleeve or center with a velcro strap or rubber bands, screen out.
+Start with light weight. Keep the screen on — the app will try to hold a wake lock while recording.</p>
+
+<!-- exercise editor -->
+<div class="overlay" id="editOverlay">
+  <div class="sheet">
+    <h3>Exercises</h3>
+    <div id="exList"></div>
+    <div class="btnrow">
+      <button class="btn" id="addExBtn">+ Add exercise</button>
+      <button class="btn primary" id="saveExBtn">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- true rep count after a set -->
+<div class="overlay" id="truthOverlay">
+  <div class="sheet">
+    <h3 id="truthTitle">How many reps did you actually do?</h3>
+    <div class="numpick">
+      <button id="tMinus">−</button>
+      <span class="val" id="tVal">8</span>
+      <button id="tPlus">+</button>
+    </div>
+    <p class="note" style="max-width:none;text-align:left">This is the ground truth that makes the recording useful — Otto counted <b id="ottoSaid">0</b>.</p>
+    <div class="btnrow">
+      <button class="btn" id="discardBtn">Discard set</button>
+      <button class="btn primary" id="saveSetBtn">Save set</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+const $=id=>document.getElementById(id);
+const APP_VERSION="otto-poc-0.1";
+
+/* ================= exercises (editable, persisted) ================= */
+let EXERCISES=[
+  {name:"Bench Press",w:135},{name:"Squat",w:185},{name:"Deadlift",w:225},
+  {name:"Overhead Press",w:95},{name:"Barbell Row",w:135}
+];
+try{
+  const saved=localStorage.getItem("otto_ex");
+  if(saved)EXERCISES=JSON.parse(saved);
+}catch(e){}
+function persistEx(){ try{localStorage.setItem("otto_ex",JSON.stringify(EXERCISES));}catch(e){} }
+
+/* ================= dial state ================= */
+const MIN_W=5,MAX_W=1000,ARC_LEN=298.45,SWEEP=360,R=47.5;
+let screenIdx=0;                 // 0 exercise · 1 load · 2 set
+let mode="exercise";             // exercise | load | ready | reps
+let exIdx=0, weight=EXERCISES[0].w, liveReps=0;
+let placement="bar";
+
+const device=$("device"),face=$("face"),bezel=$("bezel"),screenEl=$("screen"),
+      pill=$("pill"),big=$("big"),unitTxt=$("unitTxt"),statusTxt=$("statusTxt"),
+      arc=$("arc"),ringTrack=$("ringTrack"),segsG=$("segs"),
+      chLeft=$("chLeft"),chRight=$("chRight"),hint=$("hint");
+
+const fmtW=w=>Number.isInteger(w)?String(w):w.toFixed(1);
+const pt=(a,r)=>{const rad=a*Math.PI/180;return[50+r*Math.cos(rad),50+r*Math.sin(rad)];};
+function arcPath(a0,a1,r){const[x0,y0]=pt(a0,r),[x1,y1]=pt(a1,r);
+  return`M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${(a1-a0)>180?1:0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;}
+function drawSegs(n,filled){
+  const gap=Math.min(8,(SWEEP/n)*0.4),seg=(SWEEP/n)-gap;let html="";
+  for(let i=0;i<n;i++){const a0=-90+i*(seg+gap);
+    html+=`<path class="seg-track" d="${arcPath(a0,a0+seg,R)}"/>`;
+    if(i<filled)html+=`<path class="seg-fill" d="${arcPath(a0,a0+seg,R)}"/>`;}
+  segsG.innerHTML=html;
+}
+function showRing(on){ringTrack.style.display=arc.style.display=on?"":"none";segsG.style.display=on?"none":"";}
+function setArc(f){arc.style.strokeDashoffset=String(ARC_LEN*(1-Math.max(0,Math.min(1,f))));}
+function chevrons(l,r){chLeft.classList.toggle("hide",!l);chRight.classList.toggle("hide",!r);}
+function setHint(t){hint.textContent=t;}
+
+function renderExercise(){
+  mode="exercise";showRing(false);drawSegs(Math.max(EXERCISES.length,1),exIdx+1);chevrons(false,true);
+  pill.textContent="Exercise";big.classList.add("text");big.textContent=EXERCISES[exIdx]?EXERCISES[exIdx].name:"Add exercises";
+  unitTxt.textContent=(exIdx+1)+" OF "+EXERCISES.length;
+  statusTxt.textContent=sensorOK?"SENSOR READY":"ENABLE MOTION";statusTxt.classList.toggle("on",sensorOK);
+}
+function renderLoad(){
+  mode="load";showRing(true);chevrons(true,true);
+  pill.textContent="Load";big.classList.remove("text");big.textContent=fmtW(weight);
+  unitTxt.textContent="LBS";statusTxt.textContent=EXERCISES[exIdx].name.toUpperCase();statusTxt.classList.remove("on");
+  setArc(weight/500);
+}
+function renderReady(){
+  mode="ready";showRing(false);drawSegs(12,0);chevrons(true,false);
+  pill.textContent=EXERCISES[exIdx].name;big.classList.remove("text");big.textContent="0";
+  unitTxt.textContent="REPS";statusTxt.textContent="PRESS TO START";statusTxt.classList.remove("on");
+}
+function renderReps(){
+  mode="reps";chevrons(false,false);
+  big.textContent=liveReps;drawSegs(12,Math.min(liveReps,12));
+  statusTxt.textContent="RECORDING";statusTxt.classList.add("on");
+}
+const HINTS=[
+  "Rotate the bezel or swipe to pick an exercise, then press the face.",
+  "Rotate the bezel to load the weight — turn slowly for 0.5 lb steps.",
+  "Mount the phone, then press the face to START. Press again when the set is done."
+];
+function renderScreen(i){if(i===0)renderExercise();else if(i===1)renderLoad();else renderReady();setHint(HINTS[i]);}
+
+/* ---- navigation (press advances, swipe moves, bezel dials) ---- */
+let animating=false;
+function canLeave(){return mode!=="reps"&&!animating;}
+function resetScreenPos(){screenEl.style.transition="none";screenEl.style.transform="translate(0,0)";screenEl.style.opacity="1";}
+function slideTo(i,dir){
+  if(i<0||i>2||i===screenIdx||!canLeave())return;
+  animating=true;const w=face.clientWidth;
+  screenEl.style.transition="transform .2s ease, opacity .2s ease";
+  screenEl.style.transform="translateX("+(-dir*w*0.55)+"px)";screenEl.style.opacity="0";
+  setTimeout(()=>{
+    screenIdx=i;renderScreen(i);
+    screenEl.style.transition="none";screenEl.style.transform="translateX("+(dir*w*0.55)+"px)";
+    void screenEl.offsetWidth;
+    screenEl.style.transition="transform .24s ease, opacity .24s ease";
+    screenEl.style.transform="translateX(0)";screenEl.style.opacity="1";
+    setTimeout(()=>{animating=false;},250);
+  },200);
+}
+chLeft.addEventListener("click",e=>{e.stopPropagation();slideTo(screenIdx-1,-1);});
+chRight.addEventListener("click",e=>{e.stopPropagation();slideTo(screenIdx+1,1);});
+
+let bezAngle=0;
+function rotateBezel(d,anim){bezAngle+=d;bezel.style.transition=anim?"transform .22s ease":"none";bezel.style.transform="rotate("+bezAngle+"deg)";}
+function bump(dir,st){
+  if(mode==="exercise"&&EXERCISES.length){
+    exIdx=(exIdx+dir+EXERCISES.length)%EXERCISES.length;weight=EXERCISES[exIdx].w;renderExercise();
+    setHint("Press the face to select "+EXERCISES[exIdx].name+".");
+  }else if(mode==="load"){
+    st=st||5;
+    if(st>=5&&weight%5!==0){weight=dir>0?Math.ceil(weight/5)*5:Math.floor(weight/5)*5;}
+    else weight=weight+st*dir;
+    weight=Math.round(Math.max(MIN_W,Math.min(MAX_W,weight))*2)/2;
+    renderLoad();
+  }
+}
+let dragging=false,lastAngle=0,carry=0,lastMoveT=0,spd=0;
+const angleAt=e=>{const r=device.getBoundingClientRect();
+  return Math.atan2(e.clientY-(r.top+r.height/2),e.clientX-(r.left+r.width/2))*180/Math.PI;};
+device.addEventListener("pointerdown",e=>{
+  if(e.target.closest(".face")||mode==="reps")return;
+  dragging=true;carry=0;lastAngle=angleAt(e);lastMoveT=performance.now();spd=0;
+  device.setPointerCapture(e.pointerId);
+});
+device.addEventListener("pointermove",e=>{
+  if(!dragging)return;
+  const a=angleAt(e);let d=a-lastAngle;
+  if(d>180)d-=360;if(d<-180)d+=360;
+  lastAngle=a;carry+=d;rotateBezel(d,false);
+  const now=performance.now(),dt=Math.max(1,now-lastMoveT);lastMoveT=now;
+  spd=spd*0.7+(Math.abs(d)/dt*1000)*0.3;
+  const fine=(mode==="load"&&spd<70);
+  const step=mode==="exercise"?24:fine?7:9;
+  while(carry>=step){carry-=step;bump(1,fine?0.5:5);}
+  while(carry<=-step){carry+=step;bump(-1,fine?0.5:5);}
+});
+const endDrag=()=>{dragging=false;};
+device.addEventListener("pointerup",endDrag);device.addEventListener("pointercancel",endDrag);
+
+let swipeX=null,swipeDX=0,swiped=false;
+face.addEventListener("pointerdown",e=>{
+  if(e.target.closest(".chev"))return;
+  face.classList.add("pressed");swipeX=e.clientX;swipeDX=0;swiped=false;
+});
+face.addEventListener("pointermove",e=>{
+  if(swipeX===null||!canLeave())return;
+  swipeDX=e.clientX-swipeX;
+  if(Math.abs(swipeDX)>8)swiped=true;
+  const target=swipeDX<0?screenIdx+1:screenIdx-1;
+  const resist=(target<0||target>2)?0.22:0.85;
+  screenEl.style.transition="none";
+  screenEl.style.transform="translateX("+(swipeDX*resist)+"px)";
+});
+function endSwipe(){
+  face.classList.remove("pressed");
+  if(swipeX===null)return;
+  const dx=swipeDX;swipeX=null;swipeDX=0;
+  if(!canLeave()){resetScreenPos();return;}
+  const target=dx<0?screenIdx+1:screenIdx-1;
+  if(Math.abs(dx)>=56&&target>=0&&target<=2)slideTo(target,dx<0?1:-1);
+  else{screenEl.style.transition="transform .22s ease";screenEl.style.transform="translateX(0)";}
+}
+face.addEventListener("pointerup",endSwipe);
+face.addEventListener("pointercancel",()=>{swipeX=null;swiped=false;resetScreenPos();});
+face.addEventListener("click",e=>{
+  if(e.target.closest(".chev"))return;
+  if(swiped){swiped=false;return;}
+  press();
+});
+function press(){
+  if(mode==="exercise"&&EXERCISES.length)slideTo(1,1);
+  else if(mode==="load")slideTo(2,1);
+  else if(mode==="ready")startSet();
+  else if(mode==="reps")stopSet();
+}
+
+/* ================= sensors ================= */
+let sensorOK=false,lastEvT=0,hzEMA=0,recording=false,samples=[],setStartT=0;
+const chipHz=$("chipHz"),chipRec=$("chipRec");
+
+/* --- live rep detector v0 ---------------------------------------
+   Strategy: gravity gives us "which way is up" no matter how the
+   phone is mounted. Low-pass the raw accel to estimate gravity,
+   subtract it for linear acceleration, project linear accel onto
+   the gravity unit vector = vertical acceleration of the bar.
+   A rep is one full up/down oscillation: we detect a positive
+   excursion followed by a negative one (or vice versa) with
+   sufficient peak-to-peak amplitude and a refractory period.  */
+function makeDetector(){
+  return{
+    g:{x:0,y:0,z:9.81},init:false,
+    vSm:0,                       // smoothed vertical accel
+    phase:0,                     // 0 idle · 1 saw positive · -1 saw negative
+    lastRepT:0, maxV:0, minV:0,
+    THR:0.55,                    // m/s² excursion threshold
+    MIN_PP:1.1,                  // min peak-to-peak amplitude
+    REFRACT:700,                 // ms between reps
+    push(ax,ay,az,t){
+      if(!this.init){this.g={x:ax,y:ay,z:az};this.init=true;}
+      const A=0.04;              // gravity tracker ~0.4 Hz at 60 Hz
+      this.g.x+=(ax-this.g.x)*A;this.g.y+=(ay-this.g.y)*A;this.g.z+=(az-this.g.z)*A;
+      const lx=ax-this.g.x,ly=ay-this.g.y,lz=az-this.g.z;
+      const gm=Math.hypot(this.g.x,this.g.y,this.g.z)||9.81;
+      const v=(lx*this.g.x+ly*this.g.y+lz*this.g.z)/gm;   // vertical component
+      this.vSm+=(v-this.vSm)*0.25;
+      const s=this.vSm;
+      if(this.phase===0){
+        if(s>this.THR){this.phase=1;this.maxV=s;}
+        else if(s<-this.THR){this.phase=-1;this.minV=s;}
+      }else if(this.phase===1){
+        this.maxV=Math.max(this.maxV,s);
+        if(s<-this.THR){
+          if(this.maxV-s>this.MIN_PP&&t-this.lastRepT>this.REFRACT){this.lastRepT=t;this.phase=-1;this.minV=s;return true;}
+          this.phase=-1;this.minV=s;
+        }
+      }else{
+        this.minV=Math.min(this.minV,s);
+        if(s>this.THR){
+          if(s-this.minV>this.MIN_PP&&t-this.lastRepT>this.REFRACT){this.lastRepT=t;this.phase=1;this.maxV=s;return true;}
+          this.phase=1;this.maxV=s;
+        }
+      }
+      return false;
+    }
+  };
+}
+let det=makeDetector();
+
+function onMotion(e){
+  const t=performance.now();
+  if(lastEvT){const inst=1000/(t-lastEvT);hzEMA=hzEMA?hzEMA*0.95+inst*0.05:inst;}
+  lastEvT=t;
+  if(!sensorOK){sensorOK=true;chipHz.classList.add("on");if(mode==="exercise")renderExercise();}
+  const ag=e.accelerationIncludingGravity||{},la=e.acceleration||{},rr=e.rotationRate||{};
+  const ax=ag.x||0,ay=ag.y||0,az=ag.z||0;
+  if(recording){
+    samples.push([+(t-setStartT).toFixed(1),
+      +ax.toFixed(4),+ay.toFixed(4),+az.toFixed(4),
+      la.x==null?null:+la.x.toFixed(4),la.y==null?null:+la.y.toFixed(4),la.z==null?null:+la.z.toFixed(4),
+      rr.alpha==null?null:+rr.alpha.toFixed(3),rr.beta==null?null:+rr.beta.toFixed(3),rr.gamma==null?null:+rr.gamma.toFixed(3)]);
+    if(det.push(ax,ay,az,t)){liveReps++;renderReps();if(navigator.vibrate)navigator.vibrate(30);}
+  }else{
+    det.push(ax,ay,az,t);        // keep the gravity estimate warm between sets
+  }
+}
+setInterval(()=>{chipHz.textContent=hzEMA?Math.round(hzEMA)+" Hz":"— Hz";},700);
+
+$("motionBtn").addEventListener("click",async()=>{
+  try{
+    if(typeof DeviceMotionEvent!=="undefined"&&typeof DeviceMotionEvent.requestPermission==="function"){
+      const r=await DeviceMotionEvent.requestPermission();
+      if(r!=="granted"){setHint("Motion permission denied — the counter can't work without it.");return;}
+    }
+    window.addEventListener("devicemotion",onMotion);
+    $("motionBtn").textContent="Motion enabled";$("motionBtn").disabled=true;
+    setHint("Waiting for sensor data… wiggle the phone. The Hz chip should light up.");
+  }catch(err){setHint("Couldn't access motion sensors: "+err.message);}
+});
+// Android Chrome usually needs no permission — attach immediately too
+if(typeof DeviceMotionEvent==="undefined"||typeof DeviceMotionEvent.requestPermission!=="function"){
+  window.addEventListener("devicemotion",onMotion);
+  $("motionBtn").textContent="Motion auto-enabled";$("motionBtn").disabled=true;
+}
+
+/* ================= recording a set ================= */
+let wakeLock=null;
+async function grabWake(){try{wakeLock=await navigator.wakeLock.request("screen");}catch(e){}}
+function startSet(){
+  if(!sensorOK){setHint("No sensor data yet — tap Enable motion and wiggle the phone.");return;}
+  liveReps=0;samples=[];setStartT=performance.now();recording=true;
+  det=makeDetector();             // fresh detector; gravity re-locks in ~1 s
+  renderReps();setHint("Recording… rack the phone and lift. Press the face when the set is done.");
+  chipRec.textContent="REC";chipRec.classList.add("on");grabWake();
+  if(navigator.vibrate)navigator.vibrate([50,60,50]);
+}
+function stopSet(){
+  recording=false;chipRec.textContent="IDLE";chipRec.classList.remove("on");
+  if(wakeLock){wakeLock.release().catch(()=>{});wakeLock=null;}
+  truthVal=Math.max(liveReps,1);
+  $("tVal").textContent=truthVal;$("ottoSaid").textContent=liveReps;
+  $("truthOverlay").classList.add("show");
+}
+
+/* ================= ground truth + sessions ================= */
+let sessions=[];
+try{const s=localStorage.getItem("otto_sessions");if(s)sessions=JSON.parse(s);}catch(e){}
+let truthVal=8;
+$("tMinus").addEventListener("click",()=>{truthVal=Math.max(0,truthVal-1);$("tVal").textContent=truthVal;});
+$("tPlus").addEventListener("click",()=>{truthVal=Math.min(50,truthVal+1);$("tVal").textContent=truthVal;});
+$("discardBtn").addEventListener("click",()=>{$("truthOverlay").classList.remove("show");renderReady();setHint(HINTS[2]);});
+$("saveSetBtn").addEventListener("click",()=>{
+  sessions.push({
+    app:APP_VERSION,when:new Date().toISOString(),ua:navigator.userAgent,
+    exercise:EXERCISES[exIdx].name,weightLb:weight,placement:placement,
+    sampleHz:Math.round(hzEMA||0),
+    ottoCount:liveReps,trueCount:truthVal,
+    columns:["t_ms","agx","agy","agz","lax","lay","laz","rr_alpha","rr_beta","rr_gamma"],
+    samples:samples
+  });
+  try{localStorage.setItem("otto_sessions",JSON.stringify(sessions));}
+  catch(e){setHint("Storage full — data kept in memory. Export now to be safe.");}
+  refreshSessions();
+  $("truthOverlay").classList.remove("show");
+  renderReady();setHint("Saved: Otto "+liveReps+" vs true "+truthVal+". Press to record another set.");
+});
+function refreshSessions(){
+  const box=$("sessions");
+  box.querySelectorAll(".srow").forEach(r=>r.remove());
+  sessions.forEach(s=>{
+    const d=document.createElement("div");d.className="srow";
+    const hit=s.ottoCount===s.trueCount;
+    d.innerHTML="<span>"+s.exercise+" · "+fmtW(s.weightLb)+" lb · "+s.placement+"</span>"+
+      "<span class='"+(hit?"ok":"bad")+"'>"+s.ottoCount+"/"+s.trueCount+"</span>";
+    box.appendChild(d);
+  });
+  $("sesCount").textContent=sessions.length+" sets";
+  box.classList.toggle("show",sessions.length>0);
+  const ex=$("exportBtn");ex.disabled=!sessions.length;ex.textContent="Export data ("+sessions.length+")";
+}
+$("exportBtn").addEventListener("click",()=>{
+  const blob=new Blob([JSON.stringify({exported:new Date().toISOString(),app:APP_VERSION,sessions:sessions})],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="otto_sessions_"+Date.now()+".json";
+  a.click();URL.revokeObjectURL(a.href);
+  setHint("Exported "+sessions.length+" sets. Upload the JSON back to the chat for analysis.");
+});
+
+/* ================= placement toggle ================= */
+$("placeSeg").querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{
+  $("placeSeg").querySelectorAll("button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on");placement=b.dataset.p;
+}));
+
+/* ================= exercise editor ================= */
+const exList=$("exList");
+function editorRow(ex){
+  const d=document.createElement("div");d.className="exrow";
+  d.innerHTML='<input class="nm" value="'+ex.name.replace(/"/g,"&quot;")+'" placeholder="Exercise">'+
+              '<input class="wt" type="number" value="'+ex.w+'" step="5">'+
+              '<button title="remove">✕</button>';
+  d.querySelector("button").addEventListener("click",()=>d.remove());
+  return d;
+}
+$("editBtn").addEventListener("click",()=>{
+  exList.innerHTML="";
+  EXERCISES.forEach(ex=>exList.appendChild(editorRow(ex)));
+  $("editOverlay").classList.add("show");
+});
+$("addExBtn").addEventListener("click",()=>exList.appendChild(editorRow({name:"",w:45})));
+$("saveExBtn").addEventListener("click",()=>{
+  const next=[];
+  exList.querySelectorAll(".exrow").forEach(r=>{
+    const nm=r.querySelector(".nm").value.trim();
+    const w=parseFloat(r.querySelector(".wt").value)||45;
+    if(nm)next.push({name:nm,w:w});
+  });
+  if(next.length){EXERCISES=next;persistEx();exIdx=0;weight=EXERCISES[0].w;}
+  $("editOverlay").classList.remove("show");
+  screenIdx=0;renderScreen(0);
+});
+
+refreshSessions();
+renderScreen(0);
+})();
+</script>
+</body>
+</html>
